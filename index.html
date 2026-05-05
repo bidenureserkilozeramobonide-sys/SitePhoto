@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Preload fonts to avoid layout shift -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+    <title>Portfolio Minimaliste</title>
+  </head>
+  <body>
+    <header class="header">
+      <h1 class="logo">PORTFOLIO</h1>
+      <nav class="nav">
+        <a href="#gallery">Galerie</a>
+      </nav>
+    </header>
+
+    <main class="main-content">
+      <section id="gallery" class="gallery-container">
+        <!-- Images dynamically loaded via JS -->
+      </section>
+    </main>
+
+    <!-- Lightbox Modal -->
+    <div id="lightbox" class="lightbox">
+      <span class="lightbox-close">&times;</span>
+      <img class="lightbox-content" id="lightbox-img" alt="Zoomed photo" />
+      <div id="lightbox-meta" class="lightbox-meta"></div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
