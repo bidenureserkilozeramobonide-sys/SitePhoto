@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#2b1d0e" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏰</text></svg>" />
+    <title>Mon Village Médiéval</title>
+  </head>
+  <body>
+    <div id="app">
+      <!-- Barre de ressources -->
+      <header class="topbar">
+        <div class="res" id="res-food" title="Nourriture">🌾 <span>0</span></div>
+        <div class="res" id="res-wood" title="Bois">🪵 <span>0</span></div>
+        <div class="res" id="res-stone" title="Pierre">🪨 <span>0</span></div>
+        <div class="res" id="res-gold" title="Or">🪙 <span>0</span></div>
+        <div class="res" id="res-pop" title="Population">👥 <span>0/0</span></div>
+      </header>
+
+      <!-- Contenu des onglets -->
+      <main id="screen"></main>
+
+      <!-- Navigation -->
+      <nav class="tabbar">
+        <button class="tab active" data-tab="village">🏘️<small>Village</small></button>
+        <button class="tab" data-tab="armee">⚔️<small>Armée</small></button>
+        <button class="tab" data-tab="batailles">🛡️<small>Batailles</small></button>
+      </nav>
+
+      <!-- Feuille de construction (bottom sheet) -->
+      <div id="sheet" class="sheet hidden">
+        <div class="sheet-panel">
+          <div class="sheet-head">
+            <h2 id="sheet-title">Construire</h2>
+            <button id="sheet-close" class="btn-close">✕</button>
+          </div>
+          <div id="sheet-body"></div>
+        </div>
+      </div>
+
+      <!-- Modale de bataille -->
+      <div id="battle" class="battle hidden">
+        <div class="battle-panel">
+          <h2 id="battle-title">⚔️ Bataille</h2>
+          <div class="battle-hp">
+            <div class="hpbar"><div id="hp-player" class="hpfill player"></div><label>Toi</label></div>
+            <div class="hpbar"><div id="hp-enemy" class="hpfill enemy"></div><label id="enemy-name">Ennemi</label></div>
+          </div>
+          <div id="battle-log" class="battle-log"></div>
+          <button id="battle-close" class="btn primary hidden">Continuer</button>
+        </div>
+      </div>
+
+      <div id="toasts"></div>
+    </div>
+    <script type="module" src="/src/jeu/main.js"></script>
+  </body>
+</html>
