@@ -1,0 +1,142 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+// © Indicateur Complet — Tendance + Momentum + Volume
+
+//@version=6
+indicator("Indicateur Complet Pro [Tendance • Momentum • Volume]", shorttitle="Complet Pro", overlay=true, max_labels_count=500)
+
+// ═══════════════════════════════════════════════════════════════
+//  PARAMÈTRES
+// ═══════════════════════════════════════════════════════════════
+
+grpTrend   = "🌊 Tendance"
+lenFast    = input.int(21,  "EMA rapide",  minval=1, group=grpTrend)
+lenSlow    = input.int(55,  "EMA lente",   minval=1, group=grpTrend)
+stFactor   = input.float(3.0, "Supertrend — facteur", minval=0.5, step=0.25, group=grpTrend)
+stPeriod   = input.int(10,  "Supertrend — période ATR", minval=1, group=grpTrend)
+
+grpMom     = "⚡ Momentum"
+rsiLen     = input.int(14, "Longueur RSI", minval=2, group=grpMom)
+macdFast   = input.int(12, "MACD rapide",  minval=1, group=grpMom)
+macdSlow   = input.int(26, "MACD lent",    minval=1, group=grpMom)
+macdSig    = input.int(9,  "MACD signal",  minval=1, group=grpMom)
+
+grpVol     = "📊 Volume"
+volLen     = input.int(20,  "Moyenne du volume", minval=1, group=grpVol)
+volMult    = input.float(1.2, "Seuil volume fort (×)", minval=0.5, step=0.1, group=grpVol)
+
+grpStyle   = "🎨 Apparence"
+showCloud  = input.bool(true, "Nuage de tendance",        group=grpStyle)
+showSig    = input.bool(true, "Signaux BUY / SELL",       group=grpStyle)
+showDash   = input.bool(true, "Tableau de bord",          group=grpStyle)
+paintBars  = input.bool(true, "Colorer les bougies",      group=grpStyle)
+dashPos    = input.string("Haut droite", "Position du tableau", options=["Haut droite", "Haut gauche", "Bas droite", "Bas gauche"], group=grpStyle)
+
+// Palette
+colBull   = color.rgb(0, 230, 168)     // vert menthe
+colBear   = color.rgb(255, 82, 109)    // rose corail
+colNeutral= color.rgb(120, 130, 155)
+
+// ═══════════════════════════════════════════════════════════════
+//  CALCULS
+// ═══════════════════════════════════════════════════════════════
+
+// — Tendance : double EMA
+emaFast = ta.ema(close, lenFast)
+emaSlow = ta.ema(close, lenSlow)
+trendUp = emaFast > emaSlow
+
+// — Supertrend
+[stLine, stDir] = ta.supertrend(stFactor, stPeriod)
+stBull = stDir < 0
+
+// — Momentum : RSI + MACD
+rsi = ta.rsi(close, rsiLen)
+[macdLine, signalLine, histo] = ta.macd(close, macdFast, macdSlow, macdSig)
+momBull = rsi > 50 and macdLine > signalLine
+momBear = rsi < 50 and macdLine < signalLine
+
+// — Volume
+volMa    = ta.sma(volume, volLen)
+volFort  = volume > volMa * volMult
+
+// — Score de confluence (0 à 100)
+score = 0
+score += trendUp ? 25 : 0
+score += stBull ? 25 : 0
+score += rsi > 50 ? 15 : 0
+score += macdLine > signalLine ? 15 : 0
+score += close > emaFast ? 10 : 0
+score += volFort and close > open ? 10 : 0
+
+// — Signaux : croisement EMA confirmé par Supertrend + momentum
+buySignal  = ta.crossover(emaFast, emaSlow)  and stBull     and momBull
+sellSignal = ta.crossunder(emaFast, emaSlow) and not stBull and momBear
+
+// Signaux secondaires : retournement Supertrend dans le sens de la tendance EMA
+buyPullback  = stBull  and not stBull[1]  and trendUp     and rsi > 45
+sellPullback = not stBull and stBull[1]   and not trendUp and rsi < 55
+
+// ═══════════════════════════════════════════════════════════════
+//  AFFICHAGE — nuage de tendance en dégradé
+// ═══════════════════════════════════════════════════════════════
+
+trendStrength = math.min(math.abs(emaFast - emaSlow) / ta.atr(14), 3) / 3
+cloudBase     = trendUp ? colBull : colBear
+cloudCol      = color.from_gradient(trendStrength, 0, 1, color.new(cloudBase, 92), color.new(cloudBase, 72))
+
+pFast = plot(emaFast, "EMA rapide", color=color.new(cloudBase, 0),  linewidth=2)
+pSlow = plot(emaSlow, "EMA lente",  color=color.new(cloudBase, 45), linewidth=2)
+fill(pFast, pSlow, color=showCloud ? cloudCol : na, title="Nuage de tendance")
+
+// — Supertrend en pointillé discret
+plot(stLine, "Supertrend", color=color.new(stBull ? colBull : colBear, 55), style=plot.style_linebr, linewidth=1)
+
+// — Bougies colorées selon le score
+barCol = color.from_gradient(score, 0, 100, colBear, colBull)
+barcolor(paintBars ? barCol : na, title="Bougies (score)")
+
+// ═══════════════════════════════════════════════════════════════
+//  AFFICHAGE — signaux
+// ═══════════════════════════════════════════════════════════════
+
+if showSig and buySignal
+    label.new(bar_index, low, "BUY", style=label.style_label_up, color=colBull, textcolor=color.rgb(10, 20, 15), size=size.normal)
+if showSig and sellSignal
+    label.new(bar_index, high, "SELL", style=label.style_label_down, color=colBear, textcolor=color.white, size=size.normal)
+if showSig and buyPullback
+    label.new(bar_index, low, "▲", style=label.style_label_up, color=color.new(colBull, 35), textcolor=color.rgb(10, 20, 15), size=size.small)
+if showSig and sellPullback
+    label.new(bar_index, high, "▼", style=label.style_label_down, color=color.new(colBear, 35), textcolor=color.white, size=size.small)
+
+// ═══════════════════════════════════════════════════════════════
+//  TABLEAU DE BORD
+// ═══════════════════════════════════════════════════════════════
+
+posDash = dashPos == "Haut droite" ? position.top_right : dashPos == "Haut gauche" ? position.top_left : dashPos == "Bas droite" ? position.bottom_right : position.bottom_left
+
+var table dash = table.new(posDash, 2, 6, bgcolor=color.new(color.rgb(16, 20, 30), 15), border_width=1, border_color=color.new(color.rgb(60, 70, 95), 60), frame_width=1, frame_color=color.new(color.rgb(60, 70, 95), 40))
+
+cellTxt(int row, string k, string v, color c) =>
+    table.cell(dash, 0, row, k, text_color=color.rgb(160, 170, 195), text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, row, v, text_color=c, text_size=size.small, text_halign=text.align_right)
+
+if showDash and barstate.islast
+    etatGlobal = score >= 70 ? "HAUSSIER" : score <= 30 ? "BAISSIER" : "NEUTRE"
+    colGlobal  = score >= 70 ? colBull : score <= 30 ? colBear : colNeutral
+    table.cell(dash, 0, 0, "⬤ COMPLET PRO", text_color=colGlobal, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 0, etatGlobal, text_color=colGlobal, text_size=size.small, text_halign=text.align_right)
+    cellTxt(1, "Score",      str.tostring(score) + " / 100",            color.from_gradient(score, 0, 100, colBear, colBull))
+    cellTxt(2, "Tendance",   trendUp ? "Haussière" : "Baissière",        trendUp ? colBull : colBear)
+    cellTxt(3, "Supertrend", stBull ? "Achat" : "Vente",                 stBull ? colBull : colBear)
+    cellTxt(4, "RSI",        str.tostring(rsi, "#.#"),                   rsi > 50 ? colBull : colBear)
+    cellTxt(5, "Volume",     volFort ? "Fort 🔥" : "Normal",             volFort ? color.rgb(255, 190, 80) : colNeutral)
+
+// ═══════════════════════════════════════════════════════════════
+//  ALERTES
+// ═══════════════════════════════════════════════════════════════
+
+alertcondition(buySignal,    "Signal ACHAT",           "Complet Pro : signal d'ACHAT sur {{ticker}} ({{interval}})")
+alertcondition(sellSignal,   "Signal VENTE",           "Complet Pro : signal de VENTE sur {{ticker}} ({{interval}})")
+alertcondition(buyPullback,  "Reprise haussière (▲)",  "Complet Pro : reprise haussière sur {{ticker}} ({{interval}})")
+alertcondition(sellPullback, "Reprise baissière (▼)",  "Complet Pro : reprise baissière sur {{ticker}} ({{interval}})")
