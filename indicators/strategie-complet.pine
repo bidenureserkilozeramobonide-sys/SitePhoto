@@ -36,6 +36,11 @@ useShorts  = input.bool(true, "Autoriser les positions short", group=grpBT, tool
 dateStart  = input.time(timestamp("1 Jan 2020 00:00 +0000"), "Début du backtest", group=grpBT)
 dateEnd    = input.time(timestamp("1 Jan 2035 00:00 +0000"), "Fin du backtest",   group=grpBT)
 
+grpRisk    = "🛡 Sorties & filtres"
+useStExit  = input.bool(true, "Sortie sur retournement Supertrend", group=grpRisk, tooltip="Ferme la position dès que le Supertrend se retourne contre elle, sans attendre le signal opposé complet. Coupe les pertes plus tôt et protège les gains — c'est le stop suiveur de la stratégie.")
+minScore   = input.int(90, "Score minimum à l'entrée", minval=0, maxval=100, step=5, group=grpRisk, tooltip="N'entre que si le score de confluence atteint ce seuil (ou son miroir pour les shorts : 100 − score). Un signal confirmé vaut déjà ~80, donc en dessous de 85 ce filtre ne change rien ; à 90 il exige en plus que le prix soit du bon côté de l'EMA rapide ; à 100 il exige aussi un volume fort. 0 = désactivé.")
+cooldown   = input.int(10, "Bougies minimum entre deux entrées", minval=0, group=grpRisk, tooltip="Ignore un nouveau signal s'il arrive moins de N bougies après la dernière entrée — limite le sur-trading (et donc les frais) dans les périodes agitées. 0 = désactivé.")
+
 grpStyle   = "🎨 Apparence"
 showCloud  = input.bool(true, "Nuage de tendance",   group=grpStyle)
 showSig    = input.bool(true, "Signaux BUY / SELL",  group=grpStyle)
@@ -97,13 +102,28 @@ sellPullback = not stBull and stBull[1]   and not trendUp and rsi < 55
 
 inRange = time >= dateStart and time <= dateEnd
 
-if buySignal and inRange
+// — Filtres d'entrée : score de confluence et délai entre deux entrées
+var int lastEntryBar = na
+canEnter = cooldown == 0 or na(lastEntryBar) or bar_index - lastEntryBar >= cooldown
+
+longOk  = buySignal  and inRange and canEnter and score >= minScore
+shortOk = sellSignal and inRange and canEnter and 100 - score >= minScore
+
+if longOk
     strategy.entry("Long", strategy.long, qty=mise / close)
-if sellSignal and inRange
-    if useShorts
-        strategy.entry("Short", strategy.short, qty=mise / close)
-    else
-        strategy.close("Long", comment="Sortie SELL")
+    lastEntryBar := bar_index
+if shortOk and useShorts
+    strategy.entry("Short", strategy.short, qty=mise / close)
+    lastEntryBar := bar_index
+if sellSignal and inRange and not useShorts
+    strategy.close("Long", comment="Sortie SELL")
+
+// — Stop suiveur : retournement du Supertrend contre la position
+if useStExit
+    if strategy.position_size > 0 and not stBull and stBull[1]
+        strategy.close("Long", comment="Stop Supertrend")
+    if strategy.position_size < 0 and stBull and not stBull[1]
+        strategy.close("Short", comment="Stop Supertrend")
 
 // Clôture propre à la fin de la période de backtest
 if not inRange and strategy.position_size != 0
