@@ -3,7 +3,7 @@
 // © Indicateur Complet — Tendance + Momentum + Volume
 
 //@version=6
-indicator("Indicateur Complet Pro [Tendance • Momentum • Volume]", shorttitle="Complet Pro", overlay=true, max_labels_count=100, max_lines_count=100)
+indicator("Indicateur Complet Pro [Tendance • Momentum • Volume]", shorttitle="Complet Pro", overlay=true, max_labels_count=500, max_lines_count=500)
 
 // ═══════════════════════════════════════════════════════════════
 //  PARAMÈTRES
@@ -27,7 +27,7 @@ volMult    = input.float(1.2, "Seuil volume fort (×)", minval=0.5, step=0.1, gr
 
 grpMise    = "💶 Trades"
 mise       = input.float(50.0, "Mise par trade (€)", minval=1, step=10, group=grpMise)
-drawDepth  = input.int(300, "Profondeur des dessins (bougies)", minval=50, maxval=2000, group=grpMise, tooltip="Les étiquettes et lignes de trades ne sont dessinées que sur les N dernières bougies pour garder le graphique fluide. Les statistiques (trades, cumul) restent calculées sur tout l'historique.")
+drawDepth  = input.int(300, "Profondeur des dessins (bougies)", minval=50, maxval=500, group=grpMise, tooltip="Les étiquettes et lignes de trades ne sont dessinées que sur les N dernières bougies pour garder le graphique fluide. Les statistiques (trades, cumul) restent calculées sur tout l'historique.")
 
 grpStyle   = "🎨 Apparence"
 showCloud  = input.bool(true, "Nuage de tendance",             group=grpStyle)
@@ -102,22 +102,28 @@ var float cumPnl     = 0.0
 var float cumEur     = 0.0
 
 if buySignal or sellSignal
-    // Clôture de la position en cours au signal opposé
-    if posDir != 0
-        pnl = posDir * (close - entryPrice) / entryPrice * 100
-        eur = mise * pnl / 100
-        nbTrades += 1
-        nbWins   += pnl > 0 ? 1 : 0
-        cumPnl   += pnl
-        cumEur   += eur
-        if showTrades and canDraw
-            tCol = pnl >= 0 ? colBull : colBear
-            line.new(entryBar, entryPrice, bar_index, close, color=color.new(tCol, 25), width=2, style=line.style_dashed)
-            label.new(math.round(math.avg(entryBar, bar_index)), math.avg(entryPrice, close), (pnl >= 0 ? "+" : "") + str.tostring(pnl, "#.##") + " %  (" + (eur >= 0 ? "+" : "") + str.tostring(eur, "#.##") + " €)", style=label.style_label_center, color=color.new(color.rgb(16, 20, 30), 20), textcolor=tCol, size=size.small)
-    // Ouverture de la nouvelle position
-    posDir     := buySignal ? 1 : -1
-    entryPrice := close
-    entryBar   := bar_index
+    newDir = buySignal ? 1 : -1
+    // Un signal dans le même sens que la position ouverte est ignoré :
+    // seul le signal opposé clôture (et inverse) la position.
+    if posDir != newDir
+        if posDir != 0
+            pnl = posDir * (close - entryPrice) / entryPrice * 100
+            eur = mise * pnl / 100
+            nbTrades += 1
+            nbWins   += pnl > 0 ? 1 : 0
+            cumPnl   += pnl
+            cumEur   += eur
+            if showTrades and canDraw
+                tCol = pnl >= 0 ? colBull : colBear
+                // Les dessins en xloc.bar_index ne peuvent pas remonter à plus
+                // de 9999 bougies : on borne l'abscisse de l'entrée.
+                xEntry = math.max(entryBar, bar_index - 9000)
+                line.new(xEntry, entryPrice, bar_index, close, color=color.new(tCol, 25), width=2, style=line.style_dashed)
+                label.new(math.round(math.avg(xEntry, bar_index)), math.avg(entryPrice, close), (pnl >= 0 ? "+" : "") + str.tostring(pnl, "#.##") + " %  (" + (eur >= 0 ? "+" : "") + str.tostring(eur, "#.##") + " €)", style=label.style_label_center, color=color.new(color.rgb(16, 20, 30), 20), textcolor=tCol, size=size.small)
+        // Ouverture de la nouvelle position
+        posDir     := newDir
+        entryPrice := close
+        entryBar   := bar_index
 
 // P&L latent de la position en cours (en % et en €)
 pnlLatent = posDir != 0 ? posDir * (close - entryPrice) / entryPrice * 100 : na
