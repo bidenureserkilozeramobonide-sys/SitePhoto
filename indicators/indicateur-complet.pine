@@ -128,12 +128,14 @@ eurLatent = na(pnlLatent) ? na : mise * pnlLatent / 100
 winRate   = nbTrades > 0 ? 100.0 * nbWins / nbTrades : na
 
 // ═══════════════════════════════════════════════════════════════
-//  AFFICHAGE — nuage de tendance en dégradé
+//  AFFICHAGE — nuage de tendance
+//  Couleur stable par tendance : le remplissage n'est re-segmenté
+//  qu'aux retournements, ce qui le rend quasi gratuit à afficher
+//  (un dégradé continu re-segmente à chaque bougie et fait ramer).
 // ═══════════════════════════════════════════════════════════════
 
-trendStrength = math.min(math.abs(emaFast - emaSlow) / ta.atr(14), 3) / 3
-cloudBase     = trendUp ? colBull : colBear
-cloudCol      = color.from_gradient(trendStrength, 0, 1, color.new(cloudBase, 92), color.new(cloudBase, 72))
+cloudBase = trendUp ? colBull : colBear
+cloudCol  = color.new(cloudBase, 82)
 
 pFast = plot(emaFast, "EMA rapide", color=color.new(cloudBase, 0),  linewidth=2)
 pSlow = plot(emaSlow, "EMA lente",  color=color.new(cloudBase, 45), linewidth=2)
@@ -142,9 +144,10 @@ fill(pFast, pSlow, color=showCloud ? cloudCol : na, title="Nuage de tendance")
 // — Supertrend en pointillé discret
 plot(stLine, "Supertrend", color=color.new(stBull ? colBull : colBear, 55), style=plot.style_linebr, linewidth=1)
 
-// — Bougies colorées selon le score
-barCol = color.from_gradient(score, 0, 100, colBear, colBull)
-barcolor(paintBars ? barCol : na, title="Bougies (score)")
+// — Bougies teintées uniquement dans les zones fortes (score extrême) :
+//   trois états au lieu d'un dégradé continu, le rendu reste fluide.
+barCol = score >= 70 ? colBull : score <= 30 ? colBear : na
+barcolor(paintBars ? barCol : na, title="Bougies (score fort)")
 
 // ═══════════════════════════════════════════════════════════════
 //  AFFICHAGE — signaux
