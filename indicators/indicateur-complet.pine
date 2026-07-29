@@ -3,7 +3,7 @@
 // © Indicateur Complet — Tendance + Momentum + Volume
 
 //@version=6
-indicator("Indicateur Complet Pro [Tendance • Momentum • Volume]", shorttitle="Complet Pro", overlay=true, max_labels_count=500, max_lines_count=500)
+indicator("Indicateur Complet Pro [Tendance • Momentum • Volume]", shorttitle="Complet Pro", overlay=true, max_labels_count=100, max_lines_count=100)
 
 // ═══════════════════════════════════════════════════════════════
 //  PARAMÈTRES
@@ -24,6 +24,10 @@ macdSig    = input.int(9,  "MACD signal",  minval=1, group=grpMom)
 grpVol     = "📊 Volume"
 volLen     = input.int(20,  "Moyenne du volume", minval=1, group=grpVol)
 volMult    = input.float(1.2, "Seuil volume fort (×)", minval=0.5, step=0.1, group=grpVol)
+
+grpMise    = "💶 Trades"
+mise       = input.float(50.0, "Mise par trade (€)", minval=1, step=10, group=grpMise)
+drawDepth  = input.int(300, "Profondeur des dessins (bougies)", minval=50, maxval=2000, group=grpMise, tooltip="Les étiquettes et lignes de trades ne sont dessinées que sur les N dernières bougies pour garder le graphique fluide. Les statistiques (trades, cumul) restent calculées sur tout l'historique.")
 
 grpStyle   = "🎨 Apparence"
 showCloud  = input.bool(true, "Nuage de tendance",             group=grpStyle)
@@ -78,10 +82,15 @@ sellSignal = ta.crossunder(emaFast, emaSlow) and not stBull and momBear
 buyPullback  = stBull  and not stBull[1]  and trendUp     and rsi > 45
 sellPullback = not stBull and stBull[1]   and not trendUp and rsi < 55
 
+// Fenêtre de dessin : on ne crée des étiquettes/lignes que sur les
+// dernières bougies pour préserver les performances du graphique.
+canDraw = last_bar_index - bar_index <= drawDepth
+
 // ═══════════════════════════════════════════════════════════════
 //  SUIVI DES TRADES HYPOTHÉTIQUES
 //  Chaque signal BUY/SELL ouvre une position au prix de clôture ;
 //  le signal opposé la ferme (et ouvre la position inverse).
+//  Le résultat en euros est calculé pour une mise fixe par trade.
 // ═══════════════════════════════════════════════════════════════
 
 var float entryPrice = na
@@ -90,25 +99,29 @@ var int   posDir     = 0       // 1 = long, -1 = short, 0 = aucune
 var int   nbTrades   = 0
 var int   nbWins     = 0
 var float cumPnl     = 0.0
+var float cumEur     = 0.0
 
 if buySignal or sellSignal
     // Clôture de la position en cours au signal opposé
     if posDir != 0
         pnl = posDir * (close - entryPrice) / entryPrice * 100
+        eur = mise * pnl / 100
         nbTrades += 1
         nbWins   += pnl > 0 ? 1 : 0
         cumPnl   += pnl
-        if showTrades
+        cumEur   += eur
+        if showTrades and canDraw
             tCol = pnl >= 0 ? colBull : colBear
             line.new(entryBar, entryPrice, bar_index, close, color=color.new(tCol, 25), width=2, style=line.style_dashed)
-            label.new(int(math.avg(entryBar, bar_index)), math.avg(entryPrice, close), (pnl >= 0 ? "+" : "") + str.tostring(pnl, "#.##") + " %", style=label.style_label_center, color=color.new(color.rgb(16, 20, 30), 20), textcolor=tCol, size=size.small)
+            label.new(math.round(math.avg(entryBar, bar_index)), math.avg(entryPrice, close), (pnl >= 0 ? "+" : "") + str.tostring(pnl, "#.##") + " %  (" + (eur >= 0 ? "+" : "") + str.tostring(eur, "#.##") + " €)", style=label.style_label_center, color=color.new(color.rgb(16, 20, 30), 20), textcolor=tCol, size=size.small)
     // Ouverture de la nouvelle position
     posDir     := buySignal ? 1 : -1
     entryPrice := close
     entryBar   := bar_index
 
-// P&L latent de la position en cours
+// P&L latent de la position en cours (en % et en €)
 pnlLatent = posDir != 0 ? posDir * (close - entryPrice) / entryPrice * 100 : na
+eurLatent = na(pnlLatent) ? na : mise * pnlLatent / 100
 winRate   = nbTrades > 0 ? 100.0 * nbWins / nbTrades : na
 
 // ═══════════════════════════════════════════════════════════════
@@ -132,18 +145,18 @@ barcolor(paintBars ? barCol : na, title="Bougies (score)")
 
 // ═══════════════════════════════════════════════════════════════
 //  AFFICHAGE — signaux (avec prix d'entrée)
+//  Les flèches de reprise utilisent plotshape (rendu natif, léger).
 // ═══════════════════════════════════════════════════════════════
+
+plotshape(showSig and buyPullback,  "Reprise haussière",  shape.triangleup,   location.belowbar, color.new(colBull, 35), size=size.tiny)
+plotshape(showSig and sellPullback, "Reprise baissière",  shape.triangledown, location.abovebar, color.new(colBear, 35), size=size.tiny)
 
 prixTxt = str.tostring(close, format.mintick)
 
-if showSig and buySignal
+if showSig and buySignal and canDraw
     label.new(bar_index, low, showTrades ? "BUY\n" + prixTxt : "BUY", style=label.style_label_up, color=colBull, textcolor=color.rgb(10, 20, 15), size=size.normal)
-if showSig and sellSignal
+if showSig and sellSignal and canDraw
     label.new(bar_index, high, showTrades ? "SELL\n" + prixTxt : "SELL", style=label.style_label_down, color=colBear, textcolor=color.white, size=size.normal)
-if showSig and buyPullback
-    label.new(bar_index, low, "▲", style=label.style_label_up, color=color.new(colBull, 35), textcolor=color.rgb(10, 20, 15), size=size.small)
-if showSig and sellPullback
-    label.new(bar_index, high, "▼", style=label.style_label_down, color=color.new(colBear, 35), textcolor=color.white, size=size.small)
 
 // ═══════════════════════════════════════════════════════════════
 //  TABLEAU DE BORD
@@ -157,6 +170,12 @@ cellTxt(int row, string k, string v, color c) =>
     table.cell(dash, 0, row, k, text_color=color.rgb(160, 170, 195), text_size=size.small, text_halign=text.align_left)
     table.cell(dash, 1, row, v, text_color=c, text_size=size.small, text_halign=text.align_right)
 
+fmtEur(float v) =>
+    (v >= 0 ? "+" : "") + str.tostring(v, "#.##") + " €"
+
+fmtPct(float v) =>
+    (v >= 0 ? "+" : "") + str.tostring(v, "#.##") + " %"
+
 if showDash and barstate.islast
     etatGlobal = score >= 70 ? "HAUSSIER" : score <= 30 ? "BAISSIER" : "NEUTRE"
     colGlobal  = score >= 70 ? colBull : score <= 30 ? colBear : colNeutral
@@ -167,12 +186,12 @@ if showDash and barstate.islast
     cellTxt(3, "Supertrend", stBull ? "Achat" : "Vente",                 stBull ? colBull : colBear)
     cellTxt(4, "RSI",        str.tostring(rsi, "#.#"),                   rsi > 50 ? colBull : colBear)
     cellTxt(5, "Volume",     volFort ? "Fort 🔥" : "Normal",             volFort ? color.rgb(255, 190, 80) : colNeutral)
-    // — Suivi des trades
+    // — Suivi des trades (mise fixe en €)
     posTxt = posDir == 1 ? "Long @ " + str.tostring(entryPrice, format.mintick) : posDir == -1 ? "Short @ " + str.tostring(entryPrice, format.mintick) : "—"
     cellTxt(6, "Position",   posTxt,                                     posDir == 1 ? colBull : posDir == -1 ? colBear : colNeutral)
-    cellTxt(7, "P&L latent", na(pnlLatent) ? "—" : (pnlLatent >= 0 ? "+" : "") + str.tostring(pnlLatent, "#.##") + " %", na(pnlLatent) ? colNeutral : pnlLatent >= 0 ? colBull : colBear)
+    cellTxt(7, "P&L latent", na(pnlLatent) ? "—" : fmtPct(pnlLatent) + " (" + fmtEur(eurLatent) + ")", na(pnlLatent) ? colNeutral : pnlLatent >= 0 ? colBull : colBear)
     cellTxt(8, "Trades",     nbTrades == 0 ? "—" : str.tostring(nbTrades) + "  (" + str.tostring(winRate, "#.#") + " % gagnés)", colNeutral)
-    cellTxt(9, "Cumul",      nbTrades == 0 ? "—" : (cumPnl >= 0 ? "+" : "") + str.tostring(cumPnl, "#.##") + " %", cumPnl >= 0 ? colBull : colBear)
+    cellTxt(9, "Cumul (mise " + str.tostring(mise, "#.##") + " €)", nbTrades == 0 ? "—" : fmtPct(cumPnl) + " (" + fmtEur(cumEur) + ")", cumEur >= 0 ? colBull : colBear)
 
 // ═══════════════════════════════════════════════════════════════
 //  ALERTES
