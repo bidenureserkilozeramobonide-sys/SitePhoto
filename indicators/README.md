@@ -1,6 +1,9 @@
-# Indicateur Complet Pro — TradingView
+# Complet Pro — TradingView
 
-Indicateur tout-en-un pour TradingView (Pine Script v6) : **tendance + momentum + volume**, avec signaux d'achat/vente, suivi des trades en euros, tableau de bord et alertes. Optimisé pour rester fluide même sur de longs historiques.
+Deux scripts Pine Script v6 partageant la même logique **tendance + momentum + volume** :
+
+- [`indicateur-complet.pine`](indicateur-complet.pine) — l'**indicateur** : signaux, suivi des trades en euros, tableau de bord et alertes, optimisé pour rester fluide même sur de longs historiques.
+- [`strategie-complet.pine`](strategie-complet.pine) — la **stratégie** : mêmes signaux exécutés par le moteur de backtest de TradingView (onglet *Testeur de stratégie* : courbe de capital, liste des trades, taux de réussite, drawdown), avec mise fixe par trade (50 € par défaut), frais paramétrables et résultats rapportés en euros (`currency=EUR`). Options : autoriser ou non les shorts, période de backtest (dates de début/fin).
 
 ## Installation
 

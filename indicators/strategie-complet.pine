@@ -1,0 +1,189 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+// © Stratégie Complet Pro — Tendance + Momentum + Volume (version backtest)
+
+//@version=6
+strategy("Stratégie Complet Pro [Tendance • Momentum • Volume]", shorttitle="Complet Pro Strat", overlay=true,
+     initial_capital=1000,
+     currency=currency.EUR,
+     commission_type=strategy.commission.percent,
+     commission_value=0.1,
+     process_orders_on_close=true)
+
+// ═══════════════════════════════════════════════════════════════
+//  PARAMÈTRES
+// ═══════════════════════════════════════════════════════════════
+
+grpTrend   = "🌊 Tendance"
+lenFast    = input.int(21,  "EMA rapide",  minval=1, group=grpTrend)
+lenSlow    = input.int(55,  "EMA lente",   minval=1, group=grpTrend)
+stFactor   = input.float(3.0, "Supertrend — facteur", minval=0.5, step=0.25, group=grpTrend)
+stPeriod   = input.int(10,  "Supertrend — période ATR", minval=1, group=grpTrend)
+
+grpMom     = "⚡ Momentum"
+rsiLen     = input.int(14, "Longueur RSI", minval=2, group=grpMom)
+macdFast   = input.int(12, "MACD rapide",  minval=1, group=grpMom)
+macdSlow   = input.int(26, "MACD lent",    minval=1, group=grpMom)
+macdSig    = input.int(9,  "MACD signal",  minval=1, group=grpMom)
+
+grpVol     = "📊 Volume"
+volLen     = input.int(20,  "Moyenne du volume", minval=1, group=grpVol)
+volMult    = input.float(1.2, "Seuil volume fort (×)", minval=0.5, step=0.1, group=grpVol)
+
+grpBT      = "🧪 Backtest"
+mise       = input.float(50.0, "Mise par trade (€)", minval=1, step=10, group=grpBT, tooltip="Montant engagé sur chaque trade, dans la devise de l'instrument (converti en € dans le Testeur de stratégie si besoin). Les frais et le slippage se règlent dans l'onglet Propriétés de la stratégie.")
+useShorts  = input.bool(true, "Autoriser les positions short", group=grpBT, tooltip="Désactivé : un signal SELL ferme simplement la position longue au lieu d'ouvrir un short.")
+dateStart  = input.time(timestamp("1 Jan 2020 00:00 +0000"), "Début du backtest", group=grpBT)
+dateEnd    = input.time(timestamp("1 Jan 2035 00:00 +0000"), "Fin du backtest",   group=grpBT)
+
+grpStyle   = "🎨 Apparence"
+showCloud  = input.bool(true, "Nuage de tendance",   group=grpStyle)
+showSig    = input.bool(true, "Signaux BUY / SELL",  group=grpStyle)
+showDash   = input.bool(true, "Tableau de bord",     group=grpStyle)
+paintBars  = input.bool(true, "Colorer les bougies", group=grpStyle)
+dashPos    = input.string("Haut droite", "Position du tableau", options=["Haut droite", "Haut gauche", "Bas droite", "Bas gauche"], group=grpStyle)
+
+// Palette
+colBull   = color.rgb(0, 230, 168)     // vert menthe
+colBear   = color.rgb(255, 82, 109)    // rose corail
+colNeutral= color.rgb(120, 130, 155)
+
+// ═══════════════════════════════════════════════════════════════
+//  CALCULS
+// ═══════════════════════════════════════════════════════════════
+
+// — Tendance : double EMA
+emaFast = ta.ema(close, lenFast)
+emaSlow = ta.ema(close, lenSlow)
+trendUp = emaFast > emaSlow
+
+// — Supertrend
+[stLine, stDir] = ta.supertrend(stFactor, stPeriod)
+stBull = stDir < 0
+
+// — Momentum : RSI + MACD
+rsi = ta.rsi(close, rsiLen)
+[macdLine, signalLine, histo] = ta.macd(close, macdFast, macdSlow, macdSig)
+momBull = rsi > 50 and macdLine > signalLine
+momBear = rsi < 50 and macdLine < signalLine
+
+// — Volume
+volMa    = ta.sma(volume, volLen)
+volFort  = volume > volMa * volMult
+
+// — Score de confluence (0 à 100)
+score = 0
+score += trendUp ? 25 : 0
+score += stBull ? 25 : 0
+score += rsi > 50 ? 15 : 0
+score += macdLine > signalLine ? 15 : 0
+score += close > emaFast ? 10 : 0
+score += volFort and close > open ? 10 : 0
+
+// — Signaux : croisement EMA confirmé par Supertrend + momentum
+buySignal  = ta.crossover(emaFast, emaSlow)  and stBull     and momBull
+sellSignal = ta.crossunder(emaFast, emaSlow) and not stBull and momBear
+
+// Signaux secondaires : retournement Supertrend dans le sens de la tendance EMA
+buyPullback  = stBull  and not stBull[1]  and trendUp     and rsi > 45
+sellPullback = not stBull and stBull[1]   and not trendUp and rsi < 55
+
+// ═══════════════════════════════════════════════════════════════
+//  ORDRES
+//  Stop-and-reverse : un signal ouvre une position au prix de
+//  clôture de sa bougie (process_orders_on_close), le signal
+//  opposé la ferme et ouvre la position inverse.
+// ═══════════════════════════════════════════════════════════════
+
+inRange = time >= dateStart and time <= dateEnd
+
+if buySignal and inRange
+    strategy.entry("Long", strategy.long, qty=mise / close)
+if sellSignal and inRange
+    if useShorts
+        strategy.entry("Short", strategy.short, qty=mise / close)
+    else
+        strategy.close("Long", comment="Sortie SELL")
+
+// Clôture propre à la fin de la période de backtest
+if not inRange and strategy.position_size != 0
+    strategy.close_all(comment="Fin de période")
+
+// ═══════════════════════════════════════════════════════════════
+//  AFFICHAGE — nuage de tendance
+// ═══════════════════════════════════════════════════════════════
+
+cloudBase = trendUp ? colBull : colBear
+cloudCol  = color.new(cloudBase, 82)
+
+pFast = plot(emaFast, "EMA rapide", color=color.new(cloudBase, 0),  linewidth=2)
+pSlow = plot(emaSlow, "EMA lente",  color=color.new(cloudBase, 45), linewidth=2)
+fill(pFast, pSlow, color=showCloud ? cloudCol : na, title="Nuage de tendance")
+
+// — Supertrend en pointillé discret
+plot(stLine, "Supertrend", color=color.new(stBull ? colBull : colBear, 55), style=plot.style_linebr, linewidth=1)
+
+// — Bougies teintées uniquement dans les zones de score extrême
+barCol = score >= 70 ? colBull : score <= 30 ? colBear : na
+barcolor(paintBars ? barCol : na, title="Bougies (score fort)")
+
+// ═══════════════════════════════════════════════════════════════
+//  AFFICHAGE — signaux (rendu natif)
+//  Le Testeur de stratégie ajoute ses propres marqueurs d'ordres.
+// ═══════════════════════════════════════════════════════════════
+
+plotshape(showSig and buySignal,    "Signal BUY",         shape.labelup,      location.belowbar, colBull, text="BUY",  textcolor=color.rgb(10, 20, 15), size=size.small)
+plotshape(showSig and sellSignal,   "Signal SELL",        shape.labeldown,    location.abovebar, colBear, text="SELL", textcolor=color.white, size=size.small)
+plotshape(showSig and buyPullback,  "Reprise haussière",  shape.triangleup,   location.belowbar, color.new(colBull, 35), size=size.tiny)
+plotshape(showSig and sellPullback, "Reprise baissière",  shape.triangledown, location.abovebar, color.new(colBear, 35), size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════
+//  TABLEAU DE BORD (statistiques réelles du backtest)
+// ═══════════════════════════════════════════════════════════════
+
+posDash = dashPos == "Haut droite" ? position.top_right : dashPos == "Haut gauche" ? position.top_left : dashPos == "Bas droite" ? position.bottom_right : position.bottom_left
+
+var table dash = table.new(posDash, 2, 10, bgcolor=color.new(color.rgb(16, 20, 30), 15), border_width=1, border_color=color.new(color.rgb(60, 70, 95), 60), frame_width=1, frame_color=color.new(color.rgb(60, 70, 95), 40))
+
+cellTxt(int row, string k, string v, color c) =>
+    table.cell(dash, 0, row, k, text_color=color.rgb(160, 170, 195), text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, row, v, text_color=c, text_size=size.small, text_halign=text.align_right)
+
+fmtEur(float v) =>
+    (v >= 0 ? "+" : "") + str.tostring(v, "#.##") + " €"
+
+fmtPct(float v) =>
+    (v >= 0 ? "+" : "") + str.tostring(v, "#.##") + " %"
+
+if showDash and barstate.islast
+    etatGlobal = score >= 70 ? "HAUSSIER" : score <= 30 ? "BAISSIER" : "NEUTRE"
+    colGlobal  = score >= 70 ? colBull : score <= 30 ? colBear : colNeutral
+    table.cell(dash, 0, 0, "⬤ COMPLET PRO", text_color=colGlobal, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 0, etatGlobal, text_color=colGlobal, text_size=size.small, text_halign=text.align_right)
+    cellTxt(1, "Score",      str.tostring(score) + " / 100",            color.from_gradient(score, 0, 100, colBear, colBull))
+    cellTxt(2, "Tendance",   trendUp ? "Haussière" : "Baissière",        trendUp ? colBull : colBear)
+    cellTxt(3, "Supertrend", stBull ? "Achat" : "Vente",                 stBull ? colBull : colBear)
+    cellTxt(4, "RSI",        str.tostring(rsi, "#.#"),                   rsi > 50 ? colBull : colBear)
+    cellTxt(5, "Volume",     volFort ? "Fort 🔥" : "Normal",             volFort ? color.rgb(255, 190, 80) : colNeutral)
+    // — Statistiques du backtest (fournies par le moteur de stratégie)
+    posSize   = strategy.position_size
+    nbTrades  = strategy.closedtrades
+    winRate   = nbTrades > 0 ? 100.0 * strategy.wintrades / nbTrades : na
+    pnlOuvert = strategy.openprofit
+    netEur    = strategy.netprofit
+    posTxt    = posSize > 0 ? "Long @ " + str.tostring(strategy.position_avg_price, format.mintick) : posSize < 0 ? "Short @ " + str.tostring(strategy.position_avg_price, format.mintick) : "—"
+    cellTxt(6, "Position",   posTxt,                                     posSize > 0 ? colBull : posSize < 0 ? colBear : colNeutral)
+    cellTxt(7, "P&L latent", posSize != 0 ? fmtPct(100 * pnlOuvert / mise) + " (" + fmtEur(pnlOuvert) + ")" : "—", posSize == 0 ? colNeutral : pnlOuvert >= 0 ? colBull : colBear)
+    cellTxt(8, "Trades",     nbTrades == 0 ? "—" : str.tostring(nbTrades) + "  (" + str.tostring(winRate, "#.#") + " % gagnés)", colNeutral)
+    cellTxt(9, "Cumul (mise " + str.tostring(mise, "#.##") + " €)", nbTrades == 0 and posSize == 0 ? "—" : fmtPct(100 * netEur / mise) + " (" + fmtEur(netEur) + ")", netEur >= 0 ? colBull : colBear)
+
+// ═══════════════════════════════════════════════════════════════
+//  ALERTES
+//  Astuce : les stratégies proposent aussi des alertes natives sur
+//  exécution d'ordre (Alertes → Condition → Complet Pro Strat).
+// ═══════════════════════════════════════════════════════════════
+
+alertcondition(buySignal,    "Signal ACHAT",           "Complet Pro Strat : signal d'ACHAT sur {{ticker}} ({{interval}})")
+alertcondition(sellSignal,   "Signal VENTE",           "Complet Pro Strat : signal de VENTE sur {{ticker}} ({{interval}})")
+alertcondition(buyPullback,  "Reprise haussière (▲)",  "Complet Pro Strat : reprise haussière sur {{ticker}} ({{interval}})")
+alertcondition(sellPullback, "Reprise baissière (▼)",  "Complet Pro Strat : reprise baissière sur {{ticker}} ({{interval}})")
