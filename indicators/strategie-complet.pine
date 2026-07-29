@@ -37,7 +37,7 @@ dateStart  = input.time(timestamp("1 Jan 2020 00:00 +0000"), "Début du backtest
 dateEnd    = input.time(timestamp("1 Jan 2035 00:00 +0000"), "Fin du backtest",   group=grpBT)
 
 grpRisk    = "🛡 Sorties & filtres"
-useStExit  = input.bool(true, "Sortie sur retournement Supertrend", group=grpRisk, tooltip="Ferme la position dès que le Supertrend se retourne contre elle, sans attendre le signal opposé complet. Coupe les pertes plus tôt et protège les gains — c'est le stop suiveur de la stratégie.")
+useStExit  = input.bool(false, "Sortie sur retournement Supertrend", group=grpRisk, tooltip="Ferme la position dès que le Supertrend se retourne contre elle, sans attendre le signal opposé complet. Attention : sur BTC 15 min, le backtest montre que cette sortie dégrade le résultat (le Supertrend se retourne trop souvent dans les phases de range et coupe les gagnants trop tôt). À tester selon l'actif et l'unité de temps.")
 minScore   = input.int(90, "Score minimum à l'entrée", minval=0, maxval=100, step=5, group=grpRisk, tooltip="N'entre que si le score de confluence atteint ce seuil (ou son miroir pour les shorts : 100 − score). Un signal confirmé vaut déjà ~80, donc en dessous de 85 ce filtre ne change rien ; à 90 il exige en plus que le prix soit du bon côté de l'EMA rapide ; à 100 il exige aussi un volume fort. 0 = désactivé.")
 cooldown   = input.int(10, "Bougies minimum entre deux entrées", minval=0, group=grpRisk, tooltip="Ignore un nouveau signal s'il arrive moins de N bougies après la dernière entrée — limite le sur-trading (et donc les frais) dans les périodes agitées. 0 = désactivé.")
 
