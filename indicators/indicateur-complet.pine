@@ -3,7 +3,7 @@
 // © Indicateur Complet — Tendance + Momentum + Volume
 
 //@version=6
-indicator("Indicateur Complet Pro [Tendance • Momentum • Volume]", shorttitle="Complet Pro", overlay=true, max_labels_count=500)
+indicator("Indicateur Complet Pro [Tendance • Momentum • Volume]", shorttitle="Complet Pro", overlay=true, max_labels_count=500, max_lines_count=500)
 
 // ═══════════════════════════════════════════════════════════════
 //  PARAMÈTRES
@@ -26,10 +26,11 @@ volLen     = input.int(20,  "Moyenne du volume", minval=1, group=grpVol)
 volMult    = input.float(1.2, "Seuil volume fort (×)", minval=0.5, step=0.1, group=grpVol)
 
 grpStyle   = "🎨 Apparence"
-showCloud  = input.bool(true, "Nuage de tendance",        group=grpStyle)
-showSig    = input.bool(true, "Signaux BUY / SELL",       group=grpStyle)
-showDash   = input.bool(true, "Tableau de bord",          group=grpStyle)
-paintBars  = input.bool(true, "Colorer les bougies",      group=grpStyle)
+showCloud  = input.bool(true, "Nuage de tendance",             group=grpStyle)
+showSig    = input.bool(true, "Signaux BUY / SELL",            group=grpStyle)
+showTrades = input.bool(true, "Prix & résultats des trades",   group=grpStyle)
+showDash   = input.bool(true, "Tableau de bord",               group=grpStyle)
+paintBars  = input.bool(true, "Colorer les bougies",           group=grpStyle)
 dashPos    = input.string("Haut droite", "Position du tableau", options=["Haut droite", "Haut gauche", "Bas droite", "Bas gauche"], group=grpStyle)
 
 // Palette
@@ -78,6 +79,39 @@ buyPullback  = stBull  and not stBull[1]  and trendUp     and rsi > 45
 sellPullback = not stBull and stBull[1]   and not trendUp and rsi < 55
 
 // ═══════════════════════════════════════════════════════════════
+//  SUIVI DES TRADES HYPOTHÉTIQUES
+//  Chaque signal BUY/SELL ouvre une position au prix de clôture ;
+//  le signal opposé la ferme (et ouvre la position inverse).
+// ═══════════════════════════════════════════════════════════════
+
+var float entryPrice = na
+var int   entryBar   = na
+var int   posDir     = 0       // 1 = long, -1 = short, 0 = aucune
+var int   nbTrades   = 0
+var int   nbWins     = 0
+var float cumPnl     = 0.0
+
+if buySignal or sellSignal
+    // Clôture de la position en cours au signal opposé
+    if posDir != 0
+        pnl = posDir * (close - entryPrice) / entryPrice * 100
+        nbTrades += 1
+        nbWins   += pnl > 0 ? 1 : 0
+        cumPnl   += pnl
+        if showTrades
+            tCol = pnl >= 0 ? colBull : colBear
+            line.new(entryBar, entryPrice, bar_index, close, color=color.new(tCol, 25), width=2, style=line.style_dashed)
+            label.new(int(math.avg(entryBar, bar_index)), math.avg(entryPrice, close), (pnl >= 0 ? "+" : "") + str.tostring(pnl, "#.##") + " %", style=label.style_label_center, color=color.new(color.rgb(16, 20, 30), 20), textcolor=tCol, size=size.small)
+    // Ouverture de la nouvelle position
+    posDir     := buySignal ? 1 : -1
+    entryPrice := close
+    entryBar   := bar_index
+
+// P&L latent de la position en cours
+pnlLatent = posDir != 0 ? posDir * (close - entryPrice) / entryPrice * 100 : na
+winRate   = nbTrades > 0 ? 100.0 * nbWins / nbTrades : na
+
+// ═══════════════════════════════════════════════════════════════
 //  AFFICHAGE — nuage de tendance en dégradé
 // ═══════════════════════════════════════════════════════════════
 
@@ -97,13 +131,15 @@ barCol = color.from_gradient(score, 0, 100, colBear, colBull)
 barcolor(paintBars ? barCol : na, title="Bougies (score)")
 
 // ═══════════════════════════════════════════════════════════════
-//  AFFICHAGE — signaux
+//  AFFICHAGE — signaux (avec prix d'entrée)
 // ═══════════════════════════════════════════════════════════════
 
+prixTxt = str.tostring(close, format.mintick)
+
 if showSig and buySignal
-    label.new(bar_index, low, "BUY", style=label.style_label_up, color=colBull, textcolor=color.rgb(10, 20, 15), size=size.normal)
+    label.new(bar_index, low, showTrades ? "BUY\n" + prixTxt : "BUY", style=label.style_label_up, color=colBull, textcolor=color.rgb(10, 20, 15), size=size.normal)
 if showSig and sellSignal
-    label.new(bar_index, high, "SELL", style=label.style_label_down, color=colBear, textcolor=color.white, size=size.normal)
+    label.new(bar_index, high, showTrades ? "SELL\n" + prixTxt : "SELL", style=label.style_label_down, color=colBear, textcolor=color.white, size=size.normal)
 if showSig and buyPullback
     label.new(bar_index, low, "▲", style=label.style_label_up, color=color.new(colBull, 35), textcolor=color.rgb(10, 20, 15), size=size.small)
 if showSig and sellPullback
@@ -115,7 +151,7 @@ if showSig and sellPullback
 
 posDash = dashPos == "Haut droite" ? position.top_right : dashPos == "Haut gauche" ? position.top_left : dashPos == "Bas droite" ? position.bottom_right : position.bottom_left
 
-var table dash = table.new(posDash, 2, 6, bgcolor=color.new(color.rgb(16, 20, 30), 15), border_width=1, border_color=color.new(color.rgb(60, 70, 95), 60), frame_width=1, frame_color=color.new(color.rgb(60, 70, 95), 40))
+var table dash = table.new(posDash, 2, 10, bgcolor=color.new(color.rgb(16, 20, 30), 15), border_width=1, border_color=color.new(color.rgb(60, 70, 95), 60), frame_width=1, frame_color=color.new(color.rgb(60, 70, 95), 40))
 
 cellTxt(int row, string k, string v, color c) =>
     table.cell(dash, 0, row, k, text_color=color.rgb(160, 170, 195), text_size=size.small, text_halign=text.align_left)
@@ -131,6 +167,12 @@ if showDash and barstate.islast
     cellTxt(3, "Supertrend", stBull ? "Achat" : "Vente",                 stBull ? colBull : colBear)
     cellTxt(4, "RSI",        str.tostring(rsi, "#.#"),                   rsi > 50 ? colBull : colBear)
     cellTxt(5, "Volume",     volFort ? "Fort 🔥" : "Normal",             volFort ? color.rgb(255, 190, 80) : colNeutral)
+    // — Suivi des trades
+    posTxt = posDir == 1 ? "Long @ " + str.tostring(entryPrice, format.mintick) : posDir == -1 ? "Short @ " + str.tostring(entryPrice, format.mintick) : "—"
+    cellTxt(6, "Position",   posTxt,                                     posDir == 1 ? colBull : posDir == -1 ? colBear : colNeutral)
+    cellTxt(7, "P&L latent", na(pnlLatent) ? "—" : (pnlLatent >= 0 ? "+" : "") + str.tostring(pnlLatent, "#.##") + " %", na(pnlLatent) ? colNeutral : pnlLatent >= 0 ? colBull : colBear)
+    cellTxt(8, "Trades",     nbTrades == 0 ? "—" : str.tostring(nbTrades) + "  (" + str.tostring(winRate, "#.#") + " % gagnés)", colNeutral)
+    cellTxt(9, "Cumul",      nbTrades == 0 ? "—" : (cumPnl >= 0 ? "+" : "") + str.tostring(cumPnl, "#.##") + " %", cumPnl >= 0 ? colBull : colBear)
 
 // ═══════════════════════════════════════════════════════════════
 //  ALERTES
