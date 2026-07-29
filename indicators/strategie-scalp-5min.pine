@@ -1,0 +1,177 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// https://mozilla.org/MPL/2.0/
+// © Stratégie Scalp 5 min — Pullback dans la tendance 1 h
+
+//@version=6
+strategy("Stratégie Scalp 5min [Pullback multi-UT]", shorttitle="Scalp 5m", overlay=true,
+     initial_capital=1000,
+     currency=currency.EUR,
+     commission_type=strategy.commission.percent,
+     commission_value=0.1,
+     process_orders_on_close=true)
+
+// ═══════════════════════════════════════════════════════════════
+//  PRINCIPE
+//  Conçue pour le graphique 5 minutes :
+//  1. La tendance se lit en 1 h (EMA rapide vs lente) — on ne trade
+//     QUE dans son sens.
+//  2. L'entrée attend un repli vers l'EMA 21 du 5 min, puis une
+//     reprise (clôture au-dessus de l'EMA 9) avec le RSI du bon côté.
+//  3. La sortie est un couple objectif/stop basé sur l'ATR : par
+//     défaut, on vise 2 fois ce qu'on risque.
+// ═══════════════════════════════════════════════════════════════
+
+grpHtf     = "🕐 Tendance supérieure"
+htfTf      = input.timeframe("60", "Unité de temps de la tendance", group=grpHtf)
+htfFast    = input.int(21, "EMA rapide (UT sup.)", minval=1, group=grpHtf)
+htfSlow    = input.int(50, "EMA lente (UT sup.)",  minval=1, group=grpHtf)
+
+grpEntry   = "🎯 Entrée (5 min)"
+lenFast    = input.int(9,  "EMA déclencheur", minval=1, group=grpEntry)
+lenSlow    = input.int(21, "EMA de repli",    minval=1, group=grpEntry)
+pullWindow = input.int(6,  "Fenêtre du repli (bougies)", minval=1, maxval=30, group=grpEntry, tooltip="Le prix doit avoir touché l'EMA de repli dans les N dernières bougies pour qu'une reprise soit jouable.")
+rsiLen     = input.int(14, "Longueur RSI", minval=2, group=grpEntry)
+cooldown   = input.int(12, "Bougies minimum entre deux entrées", minval=0, group=grpEntry)
+
+grpExit    = "🎯 Sortie (ATR)"
+atrLen     = input.int(14,  "Période ATR", minval=1, group=grpExit)
+slMult     = input.float(1.5, "Stop : × ATR",     minval=0.5, step=0.25, group=grpExit)
+tpMult     = input.float(3.0, "Objectif : × ATR", minval=0.5, step=0.25, group=grpExit, tooltip="Avec stop 1,5 × ATR et objectif 3 × ATR, chaque gagnant rapporte 2 fois ce qu'un perdant coûte.")
+
+grpBT      = "🧪 Backtest"
+mise       = input.float(50.0, "Mise par trade (€)", minval=1, step=10, group=grpBT)
+useShorts  = input.bool(false, "Autoriser les positions short", group=grpBT, tooltip="Désactivé par défaut : sur BTC, l'analyse des trades a montré que les shorts en suivi de tendance intraday perdent nettement plus que les longs.")
+dateStart  = input.time(timestamp("1 Jan 2020 00:00 +0000"), "Début du backtest", group=grpBT)
+dateEnd    = input.time(timestamp("1 Jan 2035 00:00 +0000"), "Fin du backtest",   group=grpBT)
+
+grpStyle   = "🎨 Apparence"
+showSig    = input.bool(true, "Signaux d'entrée",              group=grpStyle)
+showDash   = input.bool(true, "Tableau de bord",               group=grpStyle)
+tintBg     = input.bool(true, "Teinter le fond selon la tendance 1 h", group=grpStyle)
+dashPos    = input.string("Haut droite", "Position du tableau", options=["Haut droite", "Haut gauche", "Bas droite", "Bas gauche"], group=grpStyle)
+
+// Palette
+colBull   = color.rgb(0, 230, 168)
+colBear   = color.rgb(255, 82, 109)
+colNeutral= color.rgb(120, 130, 155)
+
+// ═══════════════════════════════════════════════════════════════
+//  CALCULS
+// ═══════════════════════════════════════════════════════════════
+
+// — Tendance de l'unité de temps supérieure (valeurs de la bougie
+//   1 h CLÔTURÉE : pas de repeint)
+[htfF, htfS] = request.security(syminfo.tickerid, htfTf, [ta.ema(close, htfFast)[1], ta.ema(close, htfSlow)[1]], lookahead=barmerge.lookahead_on)
+htfBull = htfF > htfS
+htfBear = htfF < htfS
+
+// — 5 minutes : EMA de repli et déclencheur
+emaFast = ta.ema(close, lenFast)
+emaSlow = ta.ema(close, lenSlow)
+rsi     = ta.rsi(close, rsiLen)
+atr     = ta.atr(atrLen)
+
+// Repli récent : le prix a touché l'EMA de repli dans la fenêtre
+pullTouchLong  = low  <= emaSlow
+pullTouchShort = high >= emaSlow
+recentPullLong  = ta.barssince(pullTouchLong)  <= pullWindow
+recentPullShort = ta.barssince(pullTouchShort) <= pullWindow
+
+// Reprise : clôture qui repasse l'EMA déclencheur dans le sens de la tendance
+longSignal  = htfBull and recentPullLong  and ta.crossover(close, emaFast)  and close > emaSlow and rsi > 50
+shortSignal = htfBear and recentPullShort and ta.crossunder(close, emaFast) and close < emaSlow and rsi < 50
+
+// ═══════════════════════════════════════════════════════════════
+//  ORDRES — entrée sur signal, sortie par couple objectif/stop ATR
+// ═══════════════════════════════════════════════════════════════
+
+inRange = time >= dateStart and time <= dateEnd
+
+var int   lastEntryBar = na
+var float slPrice = na
+var float tpPrice = na
+canEnter = cooldown == 0 or na(lastEntryBar) or bar_index - lastEntryBar >= cooldown
+flat     = strategy.position_size == 0
+
+if longSignal and inRange and canEnter and flat
+    strategy.entry("Long", strategy.long, qty=mise / close)
+    slPrice := close - slMult * atr
+    tpPrice := close + tpMult * atr
+    lastEntryBar := bar_index
+
+if shortSignal and inRange and canEnter and flat and useShorts
+    strategy.entry("Short", strategy.short, qty=mise / close)
+    slPrice := close + slMult * atr
+    tpPrice := close - tpMult * atr
+    lastEntryBar := bar_index
+
+if strategy.position_size > 0
+    strategy.exit("Sortie Long", "Long", stop=slPrice, limit=tpPrice)
+if strategy.position_size < 0
+    strategy.exit("Sortie Short", "Short", stop=slPrice, limit=tpPrice)
+
+// Filet de sécurité : tendance 1 h qui s'inverse → on ne reste pas à contre-courant
+if strategy.position_size > 0 and htfBear
+    strategy.close("Long", comment="Tendance 1h inversée")
+if strategy.position_size < 0 and htfBull
+    strategy.close("Short", comment="Tendance 1h inversée")
+
+// Clôture propre à la fin de la période de backtest
+if not inRange and strategy.position_size != 0
+    strategy.close_all(comment="Fin de période")
+
+// ═══════════════════════════════════════════════════════════════
+//  AFFICHAGE
+// ═══════════════════════════════════════════════════════════════
+
+plot(emaFast, "EMA déclencheur", color=color.new(colNeutral, 40), linewidth=1)
+plot(emaSlow, "EMA de repli",    color=color.new(htfBull ? colBull : colBear, 20), linewidth=2)
+bgcolor(tintBg ? color.new(htfBull ? colBull : colBear, 96) : na, title="Tendance 1 h")
+
+// Niveaux de stop / objectif de la position en cours
+plot(strategy.position_size != 0 ? slPrice : na, "Stop",     color=color.new(colBear, 40), style=plot.style_linebr, linewidth=1)
+plot(strategy.position_size != 0 ? tpPrice : na, "Objectif", color=color.new(colBull, 40), style=plot.style_linebr, linewidth=1)
+
+plotshape(showSig and longSignal,  "Entrée Long",  shape.labelup,   location.belowbar, colBull, text="LONG",  textcolor=color.rgb(10, 20, 15), size=size.small)
+plotshape(showSig and shortSignal, "Entrée Short", shape.labeldown, location.abovebar, colBear, text="SHORT", textcolor=color.white, size=size.small)
+
+// ═══════════════════════════════════════════════════════════════
+//  TABLEAU DE BORD
+// ═══════════════════════════════════════════════════════════════
+
+posDash = dashPos == "Haut droite" ? position.top_right : dashPos == "Haut gauche" ? position.top_left : dashPos == "Bas droite" ? position.bottom_right : position.bottom_left
+
+var table dash = table.new(posDash, 2, 8, bgcolor=color.new(color.rgb(16, 20, 30), 15), border_width=1, border_color=color.new(color.rgb(60, 70, 95), 60), frame_width=1, frame_color=color.new(color.rgb(60, 70, 95), 40))
+
+cellTxt(int row, string k, string v, color c) =>
+    table.cell(dash, 0, row, k, text_color=color.rgb(160, 170, 195), text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, row, v, text_color=c, text_size=size.small, text_halign=text.align_right)
+
+fmtEur(float v) =>
+    (v >= 0 ? "+" : "") + str.tostring(v, "#.##") + " €"
+
+fmtPct(float v) =>
+    (v >= 0 ? "+" : "") + str.tostring(v, "#.##") + " %"
+
+if showDash and barstate.islast
+    colTrend = htfBull ? colBull : htfBear ? colBear : colNeutral
+    table.cell(dash, 0, 0, "⬤ SCALP 5M", text_color=colTrend, text_size=size.small, text_halign=text.align_left)
+    table.cell(dash, 1, 0, htfBull ? "TENDANCE 1H ↑" : htfBear ? "TENDANCE 1H ↓" : "NEUTRE", text_color=colTrend, text_size=size.small, text_halign=text.align_right)
+    cellTxt(1, "RSI",       str.tostring(rsi, "#.#"), rsi > 50 ? colBull : colBear)
+    cellTxt(2, "ATR",       str.tostring(atr, format.mintick) + "  (" + str.tostring(100 * atr / close, "#.##") + " %)", colNeutral)
+    posSize  = strategy.position_size
+    nbTrades = strategy.closedtrades
+    winRate  = nbTrades > 0 ? 100.0 * strategy.wintrades / nbTrades : na
+    posTxt   = posSize > 0 ? "Long @ " + str.tostring(strategy.position_avg_price, format.mintick) : posSize < 0 ? "Short @ " + str.tostring(strategy.position_avg_price, format.mintick) : "—"
+    cellTxt(3, "Position",   posTxt, posSize > 0 ? colBull : posSize < 0 ? colBear : colNeutral)
+    cellTxt(4, "P&L latent", posSize != 0 ? fmtPct(100 * strategy.openprofit / mise) + " (" + fmtEur(strategy.openprofit) + ")" : "—", posSize == 0 ? colNeutral : strategy.openprofit >= 0 ? colBull : colBear)
+    cellTxt(5, "Trades",     nbTrades == 0 ? "—" : str.tostring(nbTrades) + "  (" + str.tostring(winRate, "#.#") + " % gagnés)", colNeutral)
+    cellTxt(6, "Cumul (mise " + str.tostring(mise, "#.##") + " €)", nbTrades == 0 ? "—" : fmtPct(100 * strategy.netprofit / mise) + " (" + fmtEur(strategy.netprofit) + ")", strategy.netprofit >= 0 ? colBull : colBear)
+    cellTxt(7, "Ratio G/R",  str.tostring(tpMult / slMult, "#.#") + " : 1", colNeutral)
+
+// ═══════════════════════════════════════════════════════════════
+//  ALERTES
+// ═══════════════════════════════════════════════════════════════
+
+alertcondition(longSignal,  "Entrée LONG (scalp)",  "Scalp 5m : entrée LONG sur {{ticker}} — repli repris dans la tendance 1h haussière")
+alertcondition(shortSignal, "Entrée SHORT (scalp)", "Scalp 5m : entrée SHORT sur {{ticker}} — repli repris dans la tendance 1h baissière")

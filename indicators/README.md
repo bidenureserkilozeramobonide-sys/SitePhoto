@@ -3,7 +3,8 @@
 Deux scripts Pine Script v6 partageant la même logique **tendance + momentum + volume** :
 
 - [`indicateur-complet.pine`](indicateur-complet.pine) — l'**indicateur** : signaux, suivi des trades en euros, tableau de bord et alertes, optimisé pour rester fluide même sur de longs historiques.
-- [`strategie-complet.pine`](strategie-complet.pine) — la **stratégie** : mêmes signaux exécutés par le moteur de backtest de TradingView (onglet *Testeur de stratégie* : courbe de capital, liste des trades, taux de réussite, drawdown), avec mise fixe par trade (50 € par défaut), frais paramétrables et résultats rapportés en euros (`currency=EUR`). Options : autoriser ou non les shorts, période de backtest (dates de début/fin).
+- [`strategie-complet.pine`](strategie-complet.pine) — la **stratégie** : mêmes signaux exécutés par le moteur de backtest de TradingView (onglet *Testeur de stratégie* : courbe de capital, liste des trades, taux de réussite, drawdown), avec mise fixe par trade (50 € par défaut), frais paramétrables et résultats rapportés en euros (`currency=EUR`). Options : autoriser ou non les shorts, période de backtest (dates de début/fin), sorties et filtres (stop Supertrend, score minimum, délai entre entrées).
+- [`strategie-scalp-5min.pine`](strategie-scalp-5min.pine) — la **stratégie scalp 5 min** : logique dédiée aux petites unités de temps. La tendance est lue sur l'unité supérieure (1 h par défaut, sur bougies clôturées — pas de repeint) ; l'entrée attend un repli vers l'EMA 21 du 5 min puis une reprise au-dessus de l'EMA 9 avec RSI favorable ; la sortie est un couple objectif/stop basé sur l'ATR (ratio 2:1 par défaut). Longs seuls par défaut, cooldown entre entrées, filet de sécurité si la tendance 1 h s'inverse.
 
 ## Installation
 
