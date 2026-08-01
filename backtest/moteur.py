@@ -130,48 +130,80 @@ def supertrend(highs, lows, closes, factor, length):
 # ── Chargement CSV TradingView ─────────────────────────────────────
 
 def load_csv(path):
+    """Accepte les exports TradingView et les CSV CryptoDataDownload
+    (ligne de commentaire en tête, ordre décroissant, colonne unix)."""
     with open(path, encoding="utf-8-sig") as f:
         rows = list(csv.reader(f))
+    # certains fichiers (CryptoDataDownload) commencent par une ligne de crédit
+    while rows and (len(rows[0]) < 5 or "http" in rows[0][0].lower()):
+        rows.pop(0)
     header = [h.strip().lower() for h in rows[0]]
 
     def col(*names):
         for nm in names:
-            if nm in header:
-                return header.index(nm)
+            for j, hd in enumerate(header):
+                if hd == nm or hd.startswith(nm + " "):
+                    return j
         return None
 
-    it = col("time", "date", "date et heure", "timestamp")
+    it = col("unix", "time", "date", "date et heure", "timestamp")
     io = col("open", "ouv", "ouverture")
     ih = col("high", "haut")
     il = col("low", "bas")
     ic = col("close", "clôture", "cloture", "fermeture")
-    iv = col("volume", "vol")
+    iv = col("volume usd", "volume", "vol", "volume btc")
     if None in (it, io, ih, il, ic):
         sys.exit(f"Colonnes introuvables dans {header} — il faut time/open/high/low/close (+volume).")
 
-    ts, o, h, l, c, v = [], [], [], [], [], []
+    data = []
     for r in rows[1:]:
-        if not r or not r[io]:
+        if not r or len(r) <= max(it, io, ih, il, ic) or not r[io]:
             continue
         raw = r[it].strip()
         if raw.replace(".", "").isdigit():
-            dt = datetime.fromtimestamp(float(raw), tz=timezone.utc)
+            x = float(raw)
+            if x > 1e12:            # millisecondes
+                x /= 1000.0
+            dt = datetime.fromtimestamp(x, tz=timezone.utc)
         else:
             dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        ts.append(dt)
-        o.append(float(r[io]))
-        h.append(float(r[ih]))
-        l.append(float(r[il]))
-        c.append(float(r[ic]))
-        v.append(float(r[iv]) if iv is not None and r[iv] not in ("", "NaN") else 0.0)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        vol = 0.0
+        if iv is not None and len(r) > iv and r[iv] not in ("", "NaN"):
+            vol = float(r[iv])
+        data.append((dt, float(r[io]), float(r[ih]), float(r[il]), float(r[ic]), vol))
+
+    data.sort(key=lambda x: x[0])   # ordre chronologique croissant garanti
+    ts, o, h, l, c, v = map(list, zip(*data))
     return ts, o, h, l, c, v
+
+
+def resample(ts, o, h, l, c, v, hours):
+    """Agrège des bougies en périodes de N heures alignées sur l'epoch UTC."""
+    out = []
+    key_prev = None
+    for i in range(len(ts)):
+        key = int(ts[i].timestamp()) // (hours * 3600)
+        if key != key_prev:
+            out.append([ts[i], o[i], h[i], l[i], c[i], v[i]])
+            key_prev = key
+        else:
+            out[-1][2] = max(out[-1][2], h[i])
+            out[-1][3] = min(out[-1][3], l[i])
+            out[-1][4] = c[i]
+            out[-1][5] += v[i]
+    ts2, o2, h2, l2, c2, v2 = map(list, zip(*out))
+    return ts2, o2, h2, l2, c2, v2
 
 
 # ── Backtest ───────────────────────────────────────────────────────
 
 def run(path, mise=50.0, commission_pct=0.1, use_shorts=False, use_st_exit=False,
-        min_score=90, cooldown=10, len_fast=21, len_slow=55, quiet=False):
+        min_score=90, cooldown=10, len_fast=21, len_slow=55, resample_hours=0):
     ts, o, h, l, c, v = load_csv(path)
+    if resample_hours:
+        ts, o, h, l, c, v = resample(ts, o, h, l, c, v, resample_hours)
     n = len(c)
     if n < 200:
         sys.exit(f"Seulement {n} bougies — il en faut au moins ~200.")
@@ -309,14 +341,17 @@ def main():
     ap.add_argument("--st-exit", action="store_true")
     ap.add_argument("--min-score", type=int, default=90)
     ap.add_argument("--cooldown", type=int, default=10)
+    ap.add_argument("--resample-hours", type=int, default=0, help="agréger les bougies en N heures (ex. 4)")
     ap.add_argument("--export", help="chemin CSV pour la liste des trades")
     args = ap.parse_args()
 
     ts, trades = run(args.csv, mise=args.mise, commission_pct=args.commission,
                      use_shorts=args.shorts, use_st_exit=args.st_exit,
-                     min_score=args.min_score, cooldown=args.cooldown)
+                     min_score=args.min_score, cooldown=args.cooldown,
+                     resample_hours=args.resample_hours)
     label = f"{'LONGS+SHORTS' if args.shorts else 'LONGS SEULS'}" \
-            f"{', stop Supertrend' if args.st_exit else ''}, commission {args.commission} %"
+            f"{', stop Supertrend' if args.st_exit else ''}, commission {args.commission} %" \
+            f"{f', bougies {args.resample_hours}h' if args.resample_hours else ''}"
     report(ts, trades, args.mise, label)
 
     if args.export and trades:
